@@ -1,0 +1,41 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environment
+venv/
+ENV/
+env/
+.venv/
+
+# Environment variables (SECRETS!)
+.env
+.env.local
+.env.*.local
+
+# Mac system files
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Large data files
+data/
+uploads/
+*.index
+*.npy
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Testing
+.pytest_cache/
+.coverage
+
+# OS
+Thumbs.db
