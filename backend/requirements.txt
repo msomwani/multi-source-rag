@@ -10,3 +10,4 @@ openai
 python-dotenv
 pydantic-settings
 python-multipart
+python-docx

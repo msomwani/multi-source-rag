@@ -1,16 +1,19 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, Form
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from pathlib import Path
 from dotenv import load_dotenv
+
 load_dotenv()
 
-
 from .config import settings
-from .ingest import PDFIngestor
 from .embeddings import OpenAIEmbeddingsWrapper
 from .vectorstore import FaissStore
 from .rag import RAGService
+
+from .ingestors.pdf_ingestor import PDFIngestor
+from .ingestors.docx_ingestor import DocxIngestor
+
 
 app = FastAPI(title=settings.APP_NAME)
 
@@ -18,27 +21,68 @@ app = FastAPI(title=settings.APP_NAME)
 settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
 settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-# bootstrap components
+
+# Bootstrap components
 embedder = OpenAIEmbeddingsWrapper()
-# derive dim by embedding a tiny sample
-sample = embedder.embed(["hello world"]) if True else [[0.0]*1536]
+
+# Derive embedding dimensions
+sample = embedder.embed(["hello world"]) if True else [[0.0] * 1536]
 dim = len(sample[0])
+
 store = FaissStore(dim=dim, persist_path=settings.DATA_DIR)
 store.load()
+
 rag = RAGService(embedder=embedder, store=store)
 
 
-@app.post('/ingest/pdf')
-async def ingest_pdf(file: UploadFile = File(...)):
+# ---------------------------------------------------------
+# Auto-detect ingestor based on file extension
+# ---------------------------------------------------------
+def detect_ingestor(file_path: str):
+    ext = os.path.splitext(file_path)[1].lower()
+
+    if ext == ".pdf":
+        return PDFIngestor
+    elif ext == ".docx":
+        return DocxIngestor
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {ext}. Allowed: .pdf, .docx"
+        )
+
+
+# ---------------------------------------------------------
+# Unified ingestion endpoint
+# ---------------------------------------------------------
+@app.post("/ingest/file")
+async def ingest_file(file: UploadFile = File(...)):
+    # 1. Save uploaded file
     dest = settings.UPLOAD_DIR / file.filename
-    with open(dest, 'wb') as f:
+    with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
-    ingestor = PDFIngestor(dest)
+
+    # 2. Select appropriate ingestor
+    IngestorClass = detect_ingestor(str(dest))
+    ingestor = IngestorClass(str(dest))
+
+    # 3. Extract documents
     docs = ingestor.ingest()
+
+    # 4. Store into vector store
     rag.ingest_documents(docs)
-    return {"status": "ok", "ingested_chunks": len(docs), "source": str(dest.name)}
+
+    return {
+        "status": "ok",
+        "ingested_chunks": len(docs),
+        "source": dest.name,
+        "type": dest.suffix
+    }
 
 
-@app.post('/query')
-async def query(question: str = Form(...)):
+# ---------------------------------------------------------
+# Query endpoint (unchanged)
+# ---------------------------------------------------------
+@app.post("/query")
+async def query(question: str):
     return rag.answer(question)
