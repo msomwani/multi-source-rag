@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException,Form
+from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -24,21 +24,38 @@ settings.DATA_DIR.mkdir(parents=True, exist_ok=True)
 settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# Bootstrap components
-embedder = OpenAIEmbeddingsWrapper()
+# ------------------------------------------------------
+# INITIALIZE EMBEDDINGS + FAISS STORE SAFELY
+# ------------------------------------------------------
 
-# Derive embedding dimensions
-sample = embedder.embed(["hello world"]) if True else [[0.0] * 1536]
+# 1. Embed a dummy text to detect true embedding dimension
+embedder = OpenAIEmbeddingsWrapper()
+sample = embedder.embed(["hello world"])
 dim = len(sample[0])
 
+# 2. Initialize vector store
 store = FaissStore(dim=dim, persist_path=settings.DATA_DIR)
+
+# 3. Load persisted FAISS + docs if any
 store.load()
 
+# 4. Check for dimension mismatch (critical fix)
+if store.index.ntotal > 0:
+    stored_dim = store.index.d
+    if stored_dim != dim:
+        raise ValueError(
+            f"FAISS index dimension mismatch: stored {stored_dim} vs embedder {dim}.\n"
+            f"DELETE the folder: {settings.DATA_DIR} and restart the server."
+        )
+
+# 5. Initialize RAG
 rag = RAGService(embedder=embedder, store=store)
 
 
 
-# Auto-detect ingestor based on file extension
+# ------------------------------------------------------
+# FILE TYPE DETECTION
+# ------------------------------------------------------
 
 def detect_ingestor(file_path: str):
     ext = os.path.splitext(file_path)[1].lower()
@@ -47,33 +64,34 @@ def detect_ingestor(file_path: str):
         return PDFIngestor
     elif ext == ".docx":
         return DocxIngestor
-    elif ext in [".txt",".md",".log"]:
+    elif ext in [".txt", ".md", ".log"]:
         return TextIngestor
     else:
         raise HTTPException(
             status_code=400,
-            detail=f"Unsupported file type: {ext}. Allowed: .pdf, .docx"
+            detail=f"Unsupported file type: {ext}. Allowed: .pdf, .docx, .txt"
         )
 
 
 
-# Unified ingestion endpoint
+# ------------------------------------------------------
+# INGEST FILE ENDPOINT
+# ------------------------------------------------------
 
 @app.post("/ingest/file")
 async def ingest_file(file: UploadFile = File(...)):
-    # 1. Save uploaded file
     dest = settings.UPLOAD_DIR / file.filename
+
+    # Save uploaded file
     with open(dest, "wb") as f:
         shutil.copyfileobj(file.file, f)
 
-    # 2. Select appropriate ingestor
+    # Detect ingestor and ingest
     IngestorClass = detect_ingestor(str(dest))
     ingestor = IngestorClass(str(dest))
-
-    # 3. Extract documents
     docs = ingestor.ingest()
 
-    # 4. Store into vector store
+    # Store into vector DB
     rag.ingest_documents(docs)
 
     return {
@@ -83,28 +101,35 @@ async def ingest_file(file: UploadFile = File(...)):
         "type": dest.suffix
     }
 
+
+
+# ------------------------------------------------------
+# INGEST URL ENDPOINT
+# ------------------------------------------------------
+
 @app.post("/ingest/url")
-async def ingest_url(url:str=Form(...)):
+async def ingest_url(url: str = Form(...)):
     try:
-        ingestor=WebIngestor(url)
-        docs=ingestor.ingest()
+        ingestor = WebIngestor(url)
+        docs = ingestor.ingest()
         rag.ingest_documents(docs)
 
-        return{
-            "status":"ok",
-            "ingested_chunks":len(docs),
-            "source":url,
-            "type":"web"
+        return {
+            "status": "ok",
+            "ingested_chunks": len(docs),
+            "source": url,
+            "type": "web"
         }
-    
+
     except Exception as e:
-        raise HTTPException(status_code=400,detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 
-# ---------------------------------------------------------
-# Query endpoint (unchanged)
-# ---------------------------------------------------------
+# ------------------------------------------------------
+# QUERY ENDPOINT
+# ------------------------------------------------------
+
 @app.post("/query")
-async def query(question: str):
+async def query(question: str = Form(...)):
     return rag.answer(question)
