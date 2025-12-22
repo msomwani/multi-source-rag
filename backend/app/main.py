@@ -1,6 +1,6 @@
 import os
 import shutil
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException,Form
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -13,6 +13,7 @@ from .rag import RAGService
 
 from .ingestors.pdf_ingestor import PDFIngestor
 from .ingestors.docx_ingestor import DocxIngestor
+from .ingestors.web_ingestor import WebIngestor
 
 
 app = FastAPI(title=settings.APP_NAME)
@@ -35,9 +36,9 @@ store.load()
 rag = RAGService(embedder=embedder, store=store)
 
 
-# ---------------------------------------------------------
+
 # Auto-detect ingestor based on file extension
-# ---------------------------------------------------------
+
 def detect_ingestor(file_path: str):
     ext = os.path.splitext(file_path)[1].lower()
 
@@ -52,9 +53,9 @@ def detect_ingestor(file_path: str):
         )
 
 
-# ---------------------------------------------------------
+
 # Unified ingestion endpoint
-# ---------------------------------------------------------
+
 @app.post("/ingest/file")
 async def ingest_file(file: UploadFile = File(...)):
     # 1. Save uploaded file
@@ -78,6 +79,24 @@ async def ingest_file(file: UploadFile = File(...)):
         "source": dest.name,
         "type": dest.suffix
     }
+
+@app.post("/ingest/url")
+async def ingest_url(url:str=Form(...)):
+    try:
+        ingestor=WebIngestor(url)
+        docs=ingestor.ingest()
+        rag.ingest_documents(docs)
+
+        return{
+            "status":"ok",
+            "ingested_chunks":len(docs),
+            "source":url,
+            "type":"web"
+        }
+    
+    except Exception as e:
+        raise HTTPException(status_code=400,detail=str(e))
+
 
 
 # ---------------------------------------------------------
