@@ -14,6 +14,7 @@ from .rag import RAGService
 from .ingestors.pdf_ingestor import PDFIngestor
 from .ingestors.docx_ingestor import DocxIngestor
 from .ingestors.web_ingestor import WebIngestor
+from .ingestors.text_ingestor import TextIngestor
 
 
 app = FastAPI(title=settings.APP_NAME)
@@ -46,6 +47,8 @@ def detect_ingestor(file_path: str):
         return PDFIngestor
     elif ext == ".docx":
         return DocxIngestor
+    elif ext in [".txt",".md",".log"]:
+        return TextIngestor
     else:
         raise HTTPException(
             status_code=400,
