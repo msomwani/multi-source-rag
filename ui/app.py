@@ -13,6 +13,17 @@ st.write("Upload documents or ingest websites, then ask questions.")
 
 st.sidebar.header("📥 Ingest Data")
 
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for msg in st.session_state.messages:
+    if msg["role"] == "user":
+        with st.chat_message("user"):
+            st.write(msg["content"])
+    else:
+        with st.chat_message("assistant"):
+            st.write(msg["content"])
+
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload a document",
@@ -60,24 +71,66 @@ if url:
 st.divider()
 st.header(" Ask a Question ❓")
 
-question = st.text_input("Enter your question")
+# question = st.text_input("Enter your question")
 
+# if question:
+#     if st.button("Ask"):
+#         with st.spinner("Thinking..."):
+#             response = requests.post(
+#                 f"{BACKEND_URL}/query",
+#                 data={"question": question}
+#             )
+
+#         if response.status_code == 200:
+#             result = response.json()
+
+#             st.subheader("✅ Answer")
+#             st.write(result["answer"])
+
+#             st.subheader("📚 Sources")
+#             for src in result["sources"]:
+#                 st.json(src)
+#         else:
+#             st.error(response.text)
+
+
+question = st.chat_input("Ask a question about your documents")
 if question:
-    if st.button("Ask"):
-        with st.spinner("Thinking..."):
-            response = requests.post(
-                f"{BACKEND_URL}/query",
-                data={"question": question}
-            )
+    # 1. Store user message
+    st.session_state.messages.append({
+        "role": "user",
+        "content": question
+    })
 
-        if response.status_code == 200:
-            result = response.json()
+    with st.chat_message("user"):
+        st.write(question)
 
-            st.subheader("✅ Answer")
-            st.write(result["answer"])
+    # 2. Call backend
+    with st.spinner("Thinking..."):
+        response = requests.post(
+            "http://localhost:8000/query",
+            json={"question": question}
+        )
 
-            st.subheader("📚 Sources")
-            for src in result["sources"]:
-                st.json(src)
-        else:
-            st.error(response.text)
+    if response.status_code != 200:
+        answer_text = "Error contacting backend."
+        sources = []
+    else:
+        data = response.json()
+        answer_text = data.get("answer", "")
+        sources = data.get("sources", [])
+
+    # 3. Store assistant message
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": answer_text,
+        "sources": sources
+    })
+
+    # 4. Render assistant reply
+    with st.chat_message("assistant"):
+        st.write(answer_text)
+        if sources:
+            with st.expander("Sources"):
+                for src in sources:
+                    st.write(src)

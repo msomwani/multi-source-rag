@@ -3,6 +3,7 @@ import shutil
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from pathlib import Path
 from dotenv import load_dotenv
+from pydantic import BaseModel
 
 load_dotenv()
 
@@ -129,7 +130,9 @@ async def ingest_url(url: str = Form(...)):
 # ------------------------------------------------------
 # QUERY ENDPOINT
 # ------------------------------------------------------
+class QueryRequest(BaseModel):
+    question:str
 
 @app.post("/query")
-async def query(question: str = Form(...)):
-    return rag.answer(question)
+async def query(payload:QueryRequest):
+    return rag.answer(payload.question)
